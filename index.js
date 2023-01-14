@@ -1,4 +1,5 @@
 import fetch from "node-fetch";
+import https from 'https';
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import fs from "fs";
@@ -17,12 +18,17 @@ const FOLLOWERS_CODE = "kinZjqayUDKefGgrJxu7Tg";
 const FILENAME = "users.json";
 const DIR = "users_data";
 
+const httpsAgent = new https.Agent({
+  rejectUnauthorized: false,
+});
+
 // yes twitter hardcoded this one in main.xxxxx.js
 let bearer =
   "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 let auth_token = "";
 let csrf_token = "";
 let guest_token = "";
+let att = "";
 let cookie = "";
 
 async function Main() {
@@ -85,8 +91,6 @@ async function Main() {
 
 function get_headers() {
   return {
-    Host: "twitter.com",
-    "Sec-Ch-Ua": '" Not A;Brand";v="99", "Chromium";v="90"',
     "X-Twitter-Client-Language": "en",
     "X-Csrf-Token": csrf_token,
     "Sec-Ch-Ua-Mobile": "?0",
@@ -97,15 +101,47 @@ function get_headers() {
     "X-Guest-Token": guest_token,
     "X-Twitter-Active-User": "yes",
     Accept: "*/*",
-    Origin: "https://twitter.com",
     "Sec-Fetch-Site": "same-origin",
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Dest": "empty",
     "Accept-Encoding": "gzip, deflate",
     "Accept-Language": "en-US,en;q=0.9",
-    Connection: "close",
   };
 }
+
+function get_login_headers() {
+  return {
+    "accept": "*/*",
+    "accept-language": "en-US,en;q=0.9",
+    "authorization": "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
+    "cache-control": "no-cache",
+    "content-type": "application/json",
+    "pragma": "no-cache",
+    "sec-ch-ua": "\"Not?A_Brand\";v=\"8\", \"Chromium\";v=\"108\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Linux\"",
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-site",
+    "x-csrf-token": csrf_token,
+    "x-guest-token": guest_token,
+    "cookie": att,
+    "x-twitter-active-user": "yes",
+    "x-twitter-client-language": "en",
+    "Referer": "https://twitter.com/",
+    "Referrer-Policy": "strict-origin-when-cross-origin"
+  }
+
+}
+
+
+function get_agent() {
+  let opts = get_headers();
+  opts.rejectUnauthorized = false;
+  const ha = new https.Agent(opts);
+  return ha;
+}
+
 
 async function login(username, password) {
   try {
@@ -113,32 +149,23 @@ async function login(username, password) {
     csrf_token = generate_csrf();
     guest_token = await get_guest_token(csrf_token);
     let first_res = await fetch(
-      "https://twitter.com/i/api/1.1/onboarding/task.json?flow_name=login",
+      "https://api.twitter.com/1.1/onboarding/task.json?flow_name=login",
       {
         method: "POST",
-        headers: get_headers(),
-        body: JSON.stringify({
-          input_flow_data: {
-            flow_context: {
-              debug_overrides: {},
-              start_location: {
-                location: "splash_screen",
-              },
-            },
-          },
-          subtask_versions: {
-            contacts_live_sync_permission_prompt: 0,
-            email_verification: 1,
-            topics_selector: 1,
-            wait_spinner: 1,
-            cta: 4,
-          },
-        }),
-      }
+        headers: get_login_headers(),
+        body:
+          JSON.stringify({ "input_flow_data": { "flow_context": { "debug_overrides": {}, "start_location": { "location": "unknown" } } }, "subtask_versions": { "action_list": 2, "alert_dialog": 1, "app_download_cta": 1, "check_logged_in_account": 1, "choice_selection": 3, "contacts_live_sync_permission_prompt": 0, "cta": 7, "email_verification": 2, "end_flow": 1, "enter_date": 1, "enter_email": 2, "enter_password": 5, "enter_phone": 2, "enter_recaptcha": 1, "enter_text": 5, "enter_username": 2, "generic_urt": 3, "in_app_notification": 1, "interest_picker": 3, "js_instrumentation": 1, "menu_dialog": 1, "notifications_permission_prompt": 2, "open_account": 2, "open_home_timeline": 1, "open_link": 1, "phone_verification": 4, "privacy_options": 1, "security_key": 3, "select_avatar": 4, "select_banner": 2, "settings_list": 7, "show_code": 1, "sign_up": 2, "sign_up_review": 4, "tweet_selection_urt": 1, "update_users": 1, "upload_media": 1, "user_recommendations_list": 4, "user_recommendations_urt": 1, "wait_spinner": 3, "web_modal": 1 } })
+        ,
+      },
     );
+    att = /att=.*?;/gm.exec(
+      first_res.headers.get("set-cookie")
+    )[0];
     let data = await first_res.json();
+    // console.log(1, data);
     let flow_token = data.flow_token;
     let jsins_url = data.subtasks[0].js_instrumentation.url;
+
     let second_res = await fetch(jsins_url);
     let jsins_source = await second_res.text();
     var jsins_func = /function .*\(\) \{var.*?\n /gm.exec(jsins_source);
@@ -146,11 +173,9 @@ async function login(username, password) {
     jsins_func += "; " + jsins_func_name;
     let jsins_response = window.eval(jsins_func);
 
-    let third_res = await fetch(
-      "https://twitter.com/i/api/1.1/onboarding/task.json",
-      {
-        method: "POST",
-        headers: get_headers(),
+    let third_res = await
+      fetch("https://api.twitter.com/1.1/onboarding/task.json", {
+        "headers": get_login_headers(),
         body: JSON.stringify({
           flow_token: flow_token,
           subtask_inputs: [
@@ -163,16 +188,17 @@ async function login(username, password) {
             },
           ],
         }),
-      }
-    );
+        "method": "POST"
+      });
     data = await third_res.json();
     flow_token = data.flow_token;
+    // console.log(3, data)
 
     let fourth_res = await fetch(
       "https://twitter.com/i/api/1.1/onboarding/task.json",
       {
         method: "POST",
-        headers: get_headers(),
+        headers: get_login_headers(),
         body: JSON.stringify({
           flow_token: flow_token,
           subtask_inputs: [
@@ -197,13 +223,14 @@ async function login(username, password) {
       }
     );
     data = await fourth_res.json();
+    // console.log(4, data)
     flow_token = data.flow_token;
 
     let fifth_res = await fetch(
       "https://twitter.com/i/api/1.1/onboarding/task.json",
       {
         method: "POST",
-        headers: get_headers(),
+        headers: get_login_headers(),
         body: JSON.stringify({
           flow_token: flow_token,
           subtask_inputs: [
@@ -220,12 +247,13 @@ async function login(username, password) {
     );
     data = await fifth_res.json();
     flow_token = data.flow_token;
+    // console.log(5, data);
 
     let sixth_res = await fetch(
       "https://twitter.com/i/api/1.1/onboarding/task.json",
       {
         method: "POST",
-        headers: get_headers(),
+        headers: get_login_headers(),
         body: JSON.stringify({
           flow_token: flow_token,
           subtask_inputs: [
@@ -247,6 +275,7 @@ async function login(username, password) {
     console.log("[-] Successfully logged in");
   } catch (e) {
     console.log("[x] Error while login ... ops");
+    console.error(e)
   }
 }
 
